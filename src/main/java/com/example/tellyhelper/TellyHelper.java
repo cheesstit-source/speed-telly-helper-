@@ -1,6 +1,7 @@
 package com.example.tellyhelper;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemBlock;
@@ -60,7 +61,7 @@ public class TellyHelper {
             }
         }
 
-        EntityPlayer p = mc.thePlayer;
+        EntityPlayerSP p = mc.thePlayer;
         if (p == null || mc.theWorld == null) return;
 
         if (p.onGround != wasOnGround) {
