@@ -1,4 +1,4 @@
-цpackage com.example.tellyhelper;
+package com.example.tellyhelper;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.entity.EntityPlayerSP;
@@ -158,5 +158,4 @@ public class TellyHelper {
         ItemStack s = p.getHeldItem();
         return s != null && s.getItem() instanceof ItemBlock;
     }
-                                                        }
-      
+            }
