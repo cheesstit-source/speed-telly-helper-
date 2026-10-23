@@ -158,5 +158,4 @@ public class TellyHelper {
         ItemStack s = p.getHeldItem();
         return s != null && s.getItem() instanceof ItemBlock;
     }
-     }
-                     
+}
