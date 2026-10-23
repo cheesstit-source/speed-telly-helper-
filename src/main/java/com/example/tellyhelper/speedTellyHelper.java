@@ -10,7 +10,6 @@ import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.BlockPos;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.util.MovingObjectPosition;
-import net.minecraftforge.client.event.MouseEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.client.registry.ClientRegistry;
 import net.minecraftforge.fml.common.Mod;
@@ -22,20 +21,26 @@ import org.lwjgl.input.Keyboard;
 @Mod(modid = "tellyhelper", name = "Telly Helper", version = "1.0", clientSideOnly = true)
 public class TellyHelper {
 
-    // Сколько блоков ставишь ты сам, после этого мод ставит следующий.
-    // 2 = ты ставишь 2, мод ставит 3-й.
-    private static final int USER_BLOCKS = 2;
+    // ===== НАСТРОЙКИ =====
+    // Сколько блоков мод ставит за один прыжок
+    private static final int MAX_PER_JUMP = 3;
+    // Мод сам прыгает, когда ты идёшь вперёд с блоком в руке
+    private static final boolean AUTO_JUMP = true;
+    // Мод сам включает спринт, когда ты идёшь вперёд с блоком в руке
+    private static final boolean AUTO_SPRINT = true;
+    // Мод ставит блоки только когда под тобой пустота (ты не над островом или мостом)
+    private static final boolean ONLY_OVER_VOID = true;
+    // Писать в чат сообщения мода (поставь false, когда всё заработает)
+    private static final boolean DEBUG = true;
+    // ======================
 
     private final Minecraft mc = Minecraft.getMinecraft();
     private final KeyBinding toggleKey = new KeyBinding("Toggle Telly Helper", Keyboard.KEY_K, "Telly Helper");
 
     private boolean enabled = true;
-    private boolean wasOnGround = true;
-    private boolean placedByMod = false;
-    private int userPlaced = 0;
-
-    // для отладки
     private boolean announced = false;
+    private boolean jumpHeldByMod = false;
+    private int placedThisJump = 0;
     private String lastReason = "";
 
     @Mod.EventHandler
@@ -45,7 +50,7 @@ public class TellyHelper {
     }
 
     private void say(String msg) {
-        if (mc.thePlayer != null) {
+        if (DEBUG && mc.thePlayer != null) {
             mc.thePlayer.addChatMessage(new ChatComponentText("[TH] " + msg));
         }
     }
@@ -57,20 +62,10 @@ public class TellyHelper {
         }
     }
 
-    @SubscribeEvent
-    public void onMouse(MouseEvent e) {
-        if (!enabled || e.button != 1 || !e.buttonstate) return;
-        EntityPlayer p = mc.thePlayer;
-        if (p == null) return;
-        if (mc.currentScreen != null) { say("клик не засчитан: открыто меню"); return; }
-        if (p.onGround) { say("клик не засчитан: ты на земле"); return; }
-        if (!holdingBlock(p)) { say("клик не засчитан: в руке не блок"); return; }
-        MovingObjectPosition mop = mc.objectMouseOver;
-        if (mop != null && mop.typeOfHit == MovingObjectPosition.MovingObjectType.BLOCK) {
-            userPlaced++;
-            say("клик засчитан: " + userPlaced + " из " + USER_BLOCKS);
-        } else {
-            say("клик не засчитан: прицел не на блоке");
+    private void releaseJump() {
+        if (jumpHeldByMod) {
+            KeyBinding.setKeyBindState(mc.gameSettings.keyBindJump.getKeyCode(), false);
+            jumpHeldByMod = false;
         }
     }
 
@@ -90,20 +85,53 @@ public class TellyHelper {
 
         if (!announced) {
             announced = true;
-            say("мод загружен, включен: " + enabled + ", ты ставишь " + USER_BLOCKS + ", мод ставит следующий");
+            say("мод загружен, включен: " + enabled + ". Ты только поворачиваешь камеру.");
         }
 
-        if (p.onGround != wasOnGround) {
-            wasOnGround = p.onGround;
-            userPlaced = 0;
-            placedByMod = false;
+        if (!enabled || mc.currentScreen != null) {
+            releaseJump();
+            return;
+        }
+
+        boolean hasBlock = holdingBlock(p);
+        boolean forward = mc.gameSettings.keyBindForward.isKeyDown();
+
+        // автоспринт
+        if (AUTO_SPRINT && forward && hasBlock) {
+            KeyBinding.setKeyBindState(mc.gameSettings.keyBindSprint.getKeyCode(), true);
+        }
+
+        // автопрыжок
+        if (AUTO_JUMP) {
+            if (forward && hasBlock && p.onGround) {
+                KeyBinding.setKeyBindState(mc.gameSettings.keyBindJump.getKeyCode(), true);
+                jumpHeldByMod = true;
+            } else {
+                releaseJump();
+            }
+        }
+
+        // на земле: новый прыжок, сбрасываем счётчик
+        if (p.onGround) {
+            placedThisJump = 0;
             lastReason = "";
+            return;
         }
 
-        if (!enabled || p.onGround || placedByMod || mc.currentScreen != null) return;
-        if (userPlaced != USER_BLOCKS) return;
-        if (!holdingBlock(p)) { fail("в руке не блок"); return; }
+        if (!hasBlock) return;
+        if (placedThisJump >= MAX_PER_JUMP) return;
 
+        // под тобой должна быть пустота, иначе мод ничего не ставит
+        if (ONLY_OVER_VOID) {
+            BlockPos under1 = new BlockPos(p.posX, p.posY - 1.0, p.posZ);
+            BlockPos under2 = new BlockPos(p.posX, p.posY - 2.0, p.posZ);
+            if (!mc.theWorld.isAirBlock(under1) || !mc.theWorld.isAirBlock(under2)) {
+                fail("под тобой есть блок");
+                return;
+            }
+        }
+
+        // ставим блок туда, куда ты навёл прицел
         MovingObjectPosition mop = mc.objectMouseOver;
         if (mop == null || mop.typeOfHit != MovingObjectPosition.MovingObjectType.BLOCK) {
             fail("прицел не на блоке");
@@ -119,10 +147,10 @@ public class TellyHelper {
         ItemStack held = p.getHeldItem();
         if (mc.playerController.onPlayerRightClick(p, mc.theWorld, held, mop.getBlockPos(), mop.sideHit, mop.hitVec)) {
             p.swingItem();
-            placedByMod = true;
-            say("мод поставил блок");
+            placedThisJump++;
+            say("поставил блок " + placedThisJump + " из " + MAX_PER_JUMP);
         } else {
-            fail("сервер/игра не приняли клик");
+            fail("игра не приняла клик");
         }
     }
 
@@ -130,5 +158,5 @@ public class TellyHelper {
         ItemStack s = p.getHeldItem();
         return s != null && s.getItem() instanceof ItemBlock;
     }
-    }
-                
+     }
+                     
